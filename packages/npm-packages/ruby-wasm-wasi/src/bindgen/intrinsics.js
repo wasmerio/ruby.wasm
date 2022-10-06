@@ -5,10 +5,6 @@ export function data_view(mem) {
   if (DATA_VIEW.buffer !== mem.buffer) DATA_VIEW = new DataView(mem.buffer);
   return DATA_VIEW;
 }
-
-export function to_uint32(val) {
-  return val >>> 0;
-}
 export const UTF8_DECODER = new TextDecoder('utf-8');
 
 const UTF8_ENCODER = new TextEncoder('utf-8');

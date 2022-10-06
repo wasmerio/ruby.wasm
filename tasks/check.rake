@@ -15,7 +15,6 @@ namespace :check do
   task :bindgen_js => wit_bindgen.install_task do
     sh *[
       wit_bindgen.bin_path, "host", "js",
-      "--import", "ext/witapi/bindgen/rb-abi-guest.wit",
       "--export", "ext/js/bindgen/rb-js-abi-host.wit",
       "--out-dir", "packages/npm-packages/ruby-wasm-wasi/src/bindgen",
     ]

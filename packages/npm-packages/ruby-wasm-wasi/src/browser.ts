@@ -34,27 +34,16 @@ export const DefaultRubyVM = async (
     };
   }
 
-  const vm = new RubyVM();
-  const imports = {
-    wasi_snapshot_preview1: wasi.wasiImport,
-  };
-
-  vm.addToImports(imports);
-
-  const instance = await WebAssembly.instantiate(rubyModule, imports);
-
-  await vm.setInstance(instance);
-
-  wasi.setMemory(instance.exports.memory as WebAssembly.Memory);
+  const vm = await RubyVM.load(wasi, rubyModule);
   // Manually call `_initialize`, which is a part of reactor model ABI,
   // because the WASI polyfill doesn't support it yet.
-  (instance.exports._initialize as Function)();
+  console.log(vm.guest.instance.exports._initialize);
+  (vm.guest.instance.exports._initialize as Function)();
   vm.initialize();
 
   return {
     vm,
     wasi,
     fs: wasmFs,
-    instance,
   };
 };

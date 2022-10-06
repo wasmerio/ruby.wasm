@@ -1,4 +1,6 @@
-import * as RbAbi from "./bindgen/rb-abi-guest";
+import {bindings} from "@Michael-F-Bryan/ruby";
+import {RbAbiGuest, RbAbiValue} from "@Michael-F-Bryan/ruby/src/bindings/rb-abi-guest/rb-abi-guest";
+import { WASI } from "@wasmer/wasi";
 import { addRbJsAbiHostToImports, JsAbiValue } from "./bindgen/rb-js-abi-host";
 
 /**
@@ -21,15 +23,29 @@ import { addRbJsAbiHostToImports, JsAbiValue } from "./bindgen/rb-js-abi-host";
  *
  */
 export class RubyVM {
-  guest: RbAbi.RbAbiGuest;
-  private instance: WebAssembly.Instance | null = null;
+  guest: RbAbiGuest;
   private transport: JsValueTransport;
   private exceptionFormatter: RbExceptionFormatter;
 
-  constructor() {
-    this.guest = new RbAbi.RbAbiGuest();
+  private constructor(guest: RbAbiGuest) {
+    this.guest = guest;
     this.transport = new JsValueTransport();
     this.exceptionFormatter = new RbExceptionFormatter();
+  }
+
+  /**
+   * Initialize the Ruby Virtual Machine.
+   * @param wasi
+   * @param module
+   * @returns
+   */
+  static async load(wasi: WASI, module?: WebAssembly.Module): Promise<RubyVM> {
+    let vm: RubyVM;
+    const imports = RubyVM.imports(() => vm);
+    const guest = await bindings.rb_abi_guest({imports, module, wasi});
+    vm = new RubyVM(guest);
+
+    return vm;
   }
 
   /**
@@ -44,27 +60,8 @@ export class RubyVM {
     this.guest.rubyOptions(c_args);
   }
 
-  /**
-   * Set a given instance to interact JavaScript and Ruby's
-   * WebAssembly instance. This method must be called before calling
-   * Ruby API.
-   *
-   * @param instance The WebAssembly instance to interact with. Must
-   * be instantiated from a Ruby built with JS extension, and built
-   * with Reactor ABI instead of command line.
-   */
-  async setInstance(instance: WebAssembly.Instance) {
-    this.instance = instance;
-    await this.guest.instantiate(instance);
-  }
-
-  /**
-   * Add intrinsic import entries, which is necessary to interact JavaScript
-   * and Ruby's WebAssembly instance.
-   * @param imports The import object to add to the WebAssembly instance
-   */
-  addToImports(imports: WebAssembly.Imports) {
-    this.guest.addToImports(imports);
+  private static imports(vm: () => RubyVM): WebAssembly.Imports {
+    const imports = {};
     addRbJsAbiHostToImports(
       imports,
       {
@@ -95,13 +92,13 @@ export class RubyVM {
           return value;
         },
         procToJsFunction: (rawRbAbiValue) => {
-          const rbValue = this.rbValueofPointer(rawRbAbiValue);
+          const rbValue = vm().rbValueofPointer(rawRbAbiValue);
           return (...args) => {
-            rbValue.call('call', ...args.map(arg => this.wrap(arg)));
+            rbValue.call('call', ...args.map(arg => vm().wrap(arg)));
           }
         },
         rbObjectToJsRbValue: (rawRbAbiValue) => {
-          return this.rbValueofPointer(rawRbAbiValue);
+          return vm().rbValueofPointer(rawRbAbiValue);
         },
         jsValueToString: (value) => {
           // According to the [spec](https://tc39.es/ecma262/multipage/text-processing.html#sec-string-constructor-string-value)
@@ -110,10 +107,10 @@ export class RubyVM {
         },
         exportJsValueToHost: (value) => {
           // See `JsValueExporter` for the reason why we need to do this
-          this.transport.takeJsValue(value);
+          vm().transport.takeJsValue(value);
         },
         importJsValueFromHost: () => {
-          return this.transport.consumeJsValue();
+          return vm().transport.consumeJsValue();
         },
         instanceOf: (value, klass) => {
           if (typeof klass === "function") {
@@ -172,9 +169,11 @@ export class RubyVM {
         },
       },
       (name) => {
-        return this.instance.exports[name];
+        return vm().guest.instance.exports[name];
       }
     );
+
+    return imports;
   }
 
   /**
@@ -220,7 +219,7 @@ export class RubyVM {
   }
 
   private rbValueofPointer(pointer: number): RbValue {
-    const abiValue = new (RbAbi.RbAbiValue as any)(pointer, this.guest);
+    const abiValue = new (RbAbiValue as any)(pointer, this.guest);
     return new RbValue(abiValue, this, this.privateObject());
   }
 }
@@ -272,7 +271,7 @@ class JsValueTransport {
  */
 export class RbValue {
   constructor(
-    private inner: RbAbi.RbAbiValue,
+    private inner: RbAbiValue,
     private vm: RubyVM,
     private privateObject: RubyVMPrivate
   ) {}
@@ -435,9 +434,9 @@ const checkStatusTag = (
 const callRbMethod = (
   vm: RubyVM,
   privateObject: RubyVMPrivate,
-  recv: RbAbi.RbAbiValue,
+  recv: RbAbiValue,
   callee: string,
-  args: RbAbi.RbAbiValue[]
+  args: RbAbiValue[]
 ) => {
   const mid = vm.guest.rbIntern(callee + "\0");
   const [value, status] = vm.guest.rbFuncallvProtect(recv, mid, args);
